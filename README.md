@@ -9,6 +9,11 @@
 A Python toolkit to estimate the **front-view width** of a liquid drop sliding down an inclined surface using only **side-view** measurements.\
 Implementation of Shumaly *et al.*, **Scientific Reports** (2024).
 
+The repository supports two practical workflows:
+
+- evaluating the trained model on videos already present in `data/dataset.xlsx`
+- running inference on new measurement tables exported by the [4S-SROF toolkit](https://github.com/AK-Berger/4S-SROF)
+
 > **Why is this useful?**\
 > Drop width enters directly into both the *lateral adhesion* (Furmidge) and *dynamic friction* force equations.\
 > Conventional approaches require a second camera or mirror that shrinks the observable area and complicates alignment.\
@@ -26,6 +31,7 @@ Implementation of Shumaly *et al.*, **Scientific Reports** (2024).
 - [Installation](#installation)
 - [Usage](#usage)
   - [Training](#training)
+  - [Testing Existing Data](#testing-existing-data)
   - [Inference](#inference)
 - [Data Structure](#data-structure)
 - [Model Architecture](#model-architecture)
@@ -39,9 +45,10 @@ Implementation of Shumaly *et al.*, **Scientific Reports** (2024).
 ## Features
 
 - Train an LSTM-based regression model on side-view drop features.
-- Predict drop width from new video data for any **Video ID**.
+- Test the trained model on an existing dataset video for any `Video ID`.
+- Run inference on a new Excel file exported by the [4S-SROF toolkit](https://github.com/AK-Berger/4S-SROF).
 - Automatic normalization, sliding-window slicing, and result plotting.
-- Example scripts: `train_model.py` and `inference.py`.
+- Example scripts: `train_model.py`, `test_on_existing_data.py`, and `inference.py`.
 
 ## Installation
 
@@ -69,23 +76,50 @@ python train_model.py \
 - **--model-output**: Path to save trained model weights (.h5).
 - **--epochs**, **--batch-size**, **--window-size**: Training parameters.
 
-### Inference
+### Testing Existing Data
 
 ```bash
-python inference.py \
+python test_on_existing_data.py \
   --data-file data/dataset.xlsx \
   --weights-file models/lstm_weights.h5 \
   --video-id 14 \
-  --window-size 20 \
-  --output output/14.png
+  --window-size 20
 ```
 
 - **--data-file**: Source Excel (with `Video ID`, features, `status`).
 - **--weights-file**: Trained LSTM weights (.h5).
 - **--video-id**: Integer ID of the video to process.
 - **--window-size**: Sliding window length (frames).
-- **--output**: (Optional) Path to save plot (PNG). Without this, the plot displays interactively.
+- **--output**: (Optional) Extra path to also save the plot (PNG).
 - **Results Excel**: Saved automatically to `output/<datafile_stem>_<video_id>.xlsx`.
+- **Results Plot**: Saved automatically to `output/<datafile_stem>_<video_id>.png` and displayed at the end.
+
+### Inference
+
+Use this script when you want to predict width for a new Excel file exported by the [4S-SROF toolkit](https://github.com/AK-Berger/4S-SROF). The script uses `data/dataset.xlsx` only as the training reference for normalization and model shape. It does not test by `Video ID`; instead, it runs prediction directly on the rows in the new input file.
+
+```bash
+python inference.py \
+  --input-file data/srof_example.xlsx \
+  --reference-data-file data/dataset.xlsx \
+  --weights-file models/lstm_weights.h5 \
+  --window-size 20
+```
+
+- **--input-file**: New SROF Excel file for inference.
+- **--reference-data-file**: Reference dataset used for training normalization. Default: `data/dataset.xlsx`.
+- **--weights-file**: Trained LSTM weights (.h5).
+- **--window-size**: Sliding window length (frames).
+- **--output**: (Optional) Extra path to also save the plot (PNG).
+- **Results Excel**: Saved automatically to `output/inference_<input_file_stem>.xlsx`.
+- **Results Plot**: Saved automatically to `output/inference_<input_file_stem>.png` and displayed at the end.
+
+Inference workflow:
+
+1. Extract side-view measurements with the [4S-SROF toolkit](https://github.com/AK-Berger/4S-SROF).
+2. Export the resulting table to an Excel file with the standard column names listed below.
+3. Run `inference.py` on that Excel file.
+4. Collect the predicted width trace from the generated Excel file and plot in `output/`.
 
 ## Data Structure
 
@@ -106,9 +140,39 @@ python inference.py \
 | `Defect size [thickness,length,height] (μm)` | μm   | Surface defect dimensions              |
 | `Drop width (cm)`                            | cm   | Ground-truth front-view width          |
 
+### Inference Input: `data/srof_example.xlsx`
+
+The new Excel file passed to `inference.py` should follow the same standard structure as `data/srof_example.xlsx`. This file represents the expected output format from the [4S-SROF toolkit](https://github.com/AK-Berger/4S-SROF).
+
+The model input columns in `data/srof_example.xlsx` are aligned with the corresponding columns in `data/dataset.xlsx`, so no manual renaming is needed before inference.
+
+| Column                          | Unit | Used as model input                    |
+| ------------------------------- | ---- | -------------------------------------- |
+| `Video ID`                      | —    | Preserved in output                    |
+| `time (s)`                      | s    | Preserved in output                    |
+| `x_center (cm)`                 | cm   | Preserved in output                    |
+| `Advancing (degree)`            | °    | `Advancing (degree)`                   |
+| `Receding (degree)`             | °    | `Receding (degree)`                    |
+| `Drop length (cm)`              | cm   | `Drop length (cm)`                     |
+| `Drop height (cm)`              | cm   | `Drop height (cm)`                     |
+| `Middle line angle (degree)`    | °    | `Middle line angle (degree)`           |
+| `Velocity (cm/s)`               | cm/s | `Velocity (cm/s)`                      |
+
+Required columns for inference are:
+
+- `Advancing (degree)`
+- `Receding (degree)`
+- `Drop length (cm)`
+- `Drop height (cm)`
+- `Middle line angle (degree)`
+- `Velocity (cm/s)`
+
 ### Intermediate Outputs: `output/`
 
-- `dataset_<video_id>.xlsx`: Filtered data for each Video ID (e.g., `dataset_14.xlsx`, `dataset_234.xlsx`).
+- `dataset_<video_id>.xlsx`: Testing output for an existing dataset video.
+- `dataset_<video_id>.png`: Plot for the testing output above.
+- `inference_<input_file_stem>.xlsx`: Inference result for a new 4S-SROF Excel file.
+- `inference_<input_file_stem>.png`: Plot for the inferred widths.
 
 ## Model Architecture
 
@@ -122,21 +186,26 @@ python inference.py \
 ## Output
 
 - **Excel**: `output/<datafile_stem>_<video_id>.xlsx` containing original features plus:
-  - `Estimated Width` (μm)
-  - `Drop width (cm)` (measured)
-- **Plot**: Overlaid estimated vs measured widths vs frame index
+  - `Estimated Width (μm)`
+  - `Measured Width (μm)`
+- **Plot**: `output/<datafile_stem>_<video_id>.png` with estimated vs measured widths vs frame index
+- **Inference Excel**: `output/inference_<input_file_stem>.xlsx` containing the trimmed original 4S-SROF rows plus `Estimated Width (μm)`
+- **Inference Plot**: `output/inference_<input_file_stem>.png` with inferred widths vs frame index or exported row index
 
 ## Project Structure
 
 ```
 Drop_width_estimation/
 ├── data/
-│   └── dataset.xlsx
+│   ├── dataset.xlsx
+│   └── srof_example.xlsx
 ├── models/
 │   └── lstm_weights.h5
 ├── output/
 │   ├── dataset_14.xlsx
-│   └── dataset_234.xlsx
+│   ├── dataset_234.xlsx
+│   ├── inference_srof_example.xlsx
+│   └── inference_srof_example.png
 ├── src/
 │   └── drop_width/
 │       ├── preprocessing.py
@@ -144,6 +213,7 @@ Drop_width_estimation/
 │       └── side_to_width.py
 ├── train_model.py
 ├── inference.py
+├── test_on_existing_data.py
 ├── requirements.txt
 ├── The setup.png
 └── README.md
